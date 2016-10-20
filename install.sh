@@ -32,7 +32,7 @@ This will update your PATH and make the script available to your system.
 $INSTALLDIR to your PATH variable.
 
 Alternatively you could abort this installation and follow the instructions in the
-README to manually install Spotify AdKiller.
+README to manually install.
 
 \e[1;93mDo you want to proceed with the installation? \e[0m(y/n)"
 
