@@ -1,4 +1,4 @@
-# Spotify-Premium-O-CARALHO
+# Spotify Premium, O CARALHO!
 
 We all love Spotify, but sometimes people (like us) want to listen to our songs without having bought [Spotify Premium](https://www.spotify.com/premium/). Well, with this killer project, now you can!
 
