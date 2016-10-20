@@ -36,7 +36,8 @@ Grab the latest release:
 Run the provided installer:
 
     cd spotify-premium-o-caralho
-    chmod u+x spotify-premium-o-caralho.sh
+    chmod u+x install.sh
+    ./install.sh
 
 **Troubleshooting**
 
@@ -48,8 +49,8 @@ Run the provided installer:
 
 ### Usage
 
-1. Open Spotify
-2. Execute ```./spotify-premium-o-caralho.sh```
+1. Open Spotify and start listening your songs
+2. Execute ```spotify-premium-o-caralho.sh```
 
 ### License
 
