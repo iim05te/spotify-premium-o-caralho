@@ -3,11 +3,10 @@
 # Configs
 LIBRARY_FOLDER="library"
 BINARY="spotify"
-DEBUG=0
+DEBUG=1
 
 debuginfo() {
-    if [[ "$DEBUG" = "1" ]]
-    then
+    if [[ "$DEBUG" = "1" ]]; then
         echo "$1"
     fi
 }
@@ -23,6 +22,12 @@ init() {
         cd $LIBRARY_FOLDER
     fi
 
+    if [[ "$DEBUG" = "0" ]]; then
+        QUIET="--quiet"
+    else
+        QUIET=""
+    fi
+
     SPOTIFY_VERSION=`spotify --version`
     debuginfo "$SPOTIFY_VERSION"
 
@@ -36,62 +41,57 @@ init() {
 }
 
 get_track_info() {
-  XPROPOUTPUT=$(xprop -id "$WINDOWID" _NET_WM_NAME)
-  DBUSOUTPUT=$(dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 \
-   org.freedesktop.DBus.Properties.Get  string:'org.mpris.MediaPlayer2.Player' string:'Metadata')
-  ARTIST=$(echo "$DBUSOUTPUT"| grep xesam:artist -A 2 | grep string | cut -d\" -f 2- | sed 's/"$//g' | sed -n '2p')
-  ALBUM=$(echo "$DBUSOUTPUT"| grep xesam:album -A 2 | grep string | cut -d\" -f 2- | sed 's/"$//g' | sed -n '2p')
-  XPROP_TRACKDATA="$(echo "$XPROPOUTPUT" | cut -d\" -f 2- | sed 's/"$//g')"
-  LENGTH=$(echo "$DBUSOUTPUT" | grep mpris:length -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
-  LENGTH_SECONDS=`expr $LENGTH / 1000000`
-  # LENGTH_MINUTES=$(($LENGTH_SECONDS / 60))
+    XPROPOUTPUT=$(xprop -id "$WINDOWID" _NET_WM_NAME)
+    DBUSOUTPUT=$(dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 \
+    org.freedesktop.DBus.Properties.Get  string:'org.mpris.MediaPlayer2.Player' string:'Metadata')
+    ARTIST=$(echo "$DBUSOUTPUT"| grep xesam:artist -A 2 | grep string | cut -d\" -f 2- | sed 's/"$//g' | sed -n '2p')
+    ALBUM=$(echo "$DBUSOUTPUT"| grep xesam:album -A 2 | grep string | cut -d\" -f 2- | sed 's/"$//g' | sed -n '2p')
+    XPROP_TRACKDATA="$(echo "$XPROPOUTPUT" | cut -d\" -f 2- | sed 's/"$//g')"
+    LENGTH=$(echo "$DBUSOUTPUT" | grep mpris:length -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
+    LENGTH_SECONDS=`expr $LENGTH / 1000000`
+    # LENGTH_MINUTES=$(($LENGTH_SECONDS / 60))
 
-  TITLE=$(echo "$DBUSOUTPUT" | grep xesam:title -A 1 | grep variant | cut -d\" -f 2- | sed 's/"$//g')
-  TRACKDATA="$ARTIST - $TITLE"
+    TITLE=$(echo "$DBUSOUTPUT" | grep xesam:title -A 1 | grep variant | cut -d\" -f 2- | sed 's/"$//g')
+    TRACKDATA="$ARTIST - $TITLE"
 }
 
 get_pactl_info() {
-  pacmd list-sink-inputs | grep -B 25 "application.process.binary = \"$BINARY\""
+    pacmd list-sink-inputs | grep -B 25 "application.process.binary = \"$BINARY\""
 }
 
 get_state() {
-  get_track_info
-
-  # check if track paused
-  debuginfo "$(get_pactl_info)"
-  if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
-    # wait and recheck
-    sleep 0.75
-    if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
-      echo "PAUSED:   Yes"
-      PAUSED=1
-    fi
     get_track_info
-  else
-    echo "PAUSED:   No"
-    PAUSED=0
-    CURRENT_TRACK=$TRACKDATA
-  fi
 
-  # check if track is an ad
-  if [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "0" ]]
-    then
+    # check if track paused
+    debuginfo "$(get_pactl_info)"
+    if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
+        # wait and recheck
+        sleep 0.75
+        if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
+            echo "PAUSED:   Yes"
+            PAUSED=1
+        fi
+        get_track_info
+    else
+        echo "PAUSED:   No"
+        PAUSED=0
+        CURRENT_TRACK=$TRACKDATA
+    fi
+
+    # check if track is an ad
+    if [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "0" ]]; then
         echo "AD:       Yes"
         AD=1
-  elif [[ "$TRACKDATA" == " - Spotify" && "$PAUSED" = "0" ]]
-    then
+    elif [[ "$TRACKDATA" == " - Spotify" && "$PAUSED" = "0" ]]; then
         echo "AD:       Yes"
         AD=1
-  elif [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "1" ]]
-    then
+    elif [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "1" ]]; then
         echo "AD:       Can't say"
         AD=0
     else
         echo "AD:       No"
         AD=0
-  fi
-
-  # debuginfo "admute: $ADMUTE; pausesignal: $PAUSESIGNAL; adfinished: $ADFINISHED"
+    fi
 }
 
 print_horiz_line(){
@@ -113,14 +113,21 @@ create_album() {
 record_track() {
     FILE="$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE"
     echo "Recording $FILE".mp3
-    $CWD/recorder.sh "$LENGTH_SECONDS" "$FILE" &
+
+    killall arecord $QUIET
+    arecord -c 2 -D pulse_monitor -r 192000 -d $LENGTH_SECONDS $QUIET "$FILE".wav
+    # lame -V0 -h --vbr-new "$FILE.wav" "$FILE.mp3"
+    lame -h "$FILE.wav" "$FILE.mp3" $QUIET
+    if [ -f "$FILE.wav" ]; then
+        rm -f "$FILE.wav"
+    fi
 }
 
 create_track() {
     create_artist
     create_album
     if [ ! -f "$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE" ]; then
-        record_track
+        record_track &
     fi
 }
 
