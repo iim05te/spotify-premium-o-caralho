@@ -55,6 +55,9 @@ checkdep(){
 
 # MAIN
 
+## install dependencies
+sudo apt-get install -y x11-utils pulseaudio-utils xdotool alsa-utils lame libsox-fmt-mp3 python-mutagen
+
 ## check for missing dependencies
 checkdep
 if [[ $missing -eq 1 ]]; then
