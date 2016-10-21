@@ -19,7 +19,7 @@ Utilities used in the script:
 
 Install all utilities + VLC on **[Ubuntu](http://www.ubuntu.com/)** with:
 
-    sudo apt-get install x11-utils pulseaudio-utils xdotool alsa-utils lame
+    sudo apt-get install x11-utils pulseaudio-utils xdotool alsa-utils lame libsox-fmt-mp3 python-mutagen
 
 ### Installation
 
