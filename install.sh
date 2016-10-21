@@ -3,7 +3,7 @@
 # WARNING: This installation script has only been tested on Ubuntu
 
 # DEPENDENCIES
-dep=(xprop pacmd xdotool arecord lame)
+dep=(xprop pacmd xdotool arecord lame sox mid3v2)
 
 # TEXT COLOURS
 readonly RED="\033[01;31m"
