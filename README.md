@@ -12,12 +12,8 @@ Utilities used in the script:
   - xdotool
   - arecord
   - lame
-
-[![openSUSE](https://news.opensuse.org/wp-content/uploads/2014/11/468x60.png)](http://www.opensuse.org/)
-
-Install all utilities + VLC on **[openSUSE](http://www.opensuse.org/)** with:
-
-    sudo zypper in binutils pulseaudio-utils xdotool alsa-utils lame
+  - libsox-fmt-mp3
+  - python-mutagen
 
 [![Ubuntu](http://spreadubuntu.neomenlo.org/files/banner-468x60.png)](http://www.ubuntu.com/)
 
@@ -50,7 +46,7 @@ Run the provided installer:
 ### Usage
 
 1. Open Spotify and start listening your songs
-2. Execute ```spotify-premium-o-caralho.sh```
+2. Execute ```spotify-premium-o-caralho.sh -h```
 
 ### License
 

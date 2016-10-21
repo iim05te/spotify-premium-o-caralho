@@ -3,7 +3,7 @@
 # Configs
 LIBRARY_FOLDER="library"
 BINARY="spotify"
-DEBUG=1
+TMP_FOLDER="/tmp"
 
 debuginfo() {
     if [[ "$DEBUG" = "1" ]]; then
@@ -11,17 +11,51 @@ debuginfo() {
     fi
 }
 
+usage() {
+    echo "$0 [-v] [-d <path>]" 1>&2;
+    echo ""
+    echo "Available options:"
+    echo "-d <path> Sets the library directory"
+    echo "-h        Displays this help page"
+    echo "-v        Turns on the debug mode"
+}
+
 init() {
+    DEBUG=0
+
+    while getopts ":d: :h :v" opt; do
+        case $opt in
+            d)
+                LIBRARY_FOLDER="$OPTARG"
+                ;;
+            h)
+                usage
+                exit 1
+                ;;
+            v)
+                DEBUG=1
+                ;;
+            \?)
+                echo "Invalid option: -$OPTARG" >&2
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
+    # Makes the library path absolute
     if [[ ! "$LIBRARY_FOLDER" = /* ]]; then
-        CWD=`pwd`
-        LIBRARY_FOLDER="$CWD/$LIBRARY_FOLDER"
+        LIBRARY_FOLDER=`readlink -f $LIBRARY_FOLDER`
         debuginfo "Library: $LIBRARY_FOLDER"
     fi
+
+    # Creates the library folder if it doesn't exist
     if [ ! -d "$LIBRARY_FOLDER" ]; then
         mkdir $LIBRARY_FOLDER
         cd $LIBRARY_FOLDER
     fi
 
+    # Sets on quiet mode if it isn't on debug mode
     if [[ "$DEBUG" = "0" ]]; then
         QUIET="--quiet"
     else
@@ -47,9 +81,9 @@ get_track_info() {
     ARTIST=$(echo "$DBUSOUTPUT"| grep xesam:artist -A 2 | grep string | cut -d\" -f 2- | sed 's/"$//g' | sed -n '2p')
     ALBUM=$(echo "$DBUSOUTPUT"| grep xesam:album -A 2 | grep string | cut -d\" -f 2- | sed 's/"$//g' | sed -n '2p')
     XPROP_TRACKDATA="$(echo "$XPROPOUTPUT" | cut -d\" -f 2- | sed 's/"$//g')"
+    TRACK_NUMBER=$(echo "$DBUSOUTPUT" | grep xesam:trackNumber -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
     LENGTH=$(echo "$DBUSOUTPUT" | grep mpris:length -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
     LENGTH_SECONDS=`expr $LENGTH / 1000000`
-    # LENGTH_MINUTES=$(($LENGTH_SECONDS / 60))
 
     TITLE=$(echo "$DBUSOUTPUT" | grep xesam:title -A 1 | grep variant | cut -d\" -f 2- | sed 's/"$//g')
     TRACKDATA="$ARTIST - $TITLE"
@@ -73,6 +107,7 @@ get_state() {
         fi
         get_track_info
     else
+        get_track_info
         echo "PAUSED:   No"
         PAUSED=0
         CURRENT_TRACK=$TRACKDATA
@@ -111,15 +146,51 @@ create_album() {
 }
 
 record_track() {
-    FILE="$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE"
-    echo "Recording $FILE".mp3
+    MP3_FILE="$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE.mp3"
+    TMP_FILE="$TMP_FOLDER/temp`date +%s`.wav"
 
+    # Stops all active recordings
     killall arecord $QUIET
-    arecord -c 2 -D pulse_monitor -r 192000 -d $LENGTH_SECONDS $QUIET "$FILE".wav
-    # lame -V0 -h --vbr-new "$FILE.wav" "$FILE.mp3"
-    lame -h "$FILE.wav" "$FILE.mp3" $QUIET
-    if [ -f "$FILE.wav" ]; then
-        rm -f "$FILE.wav"
+
+    # Checks if the track needs to be recorded.
+    if [ -f "$MP3_FILE" ]; then
+        exit 1
+    fi
+
+    # Captures sound from "pulse_monitor" device to a temporary wav file
+    echo "Recording $MP3_FILE"
+    arecord -f cd -D pulse_monitor -r 44100 -d $LENGTH_SECONDS $QUIET "$TMP_FILE"
+
+    # Converts the temporary wav file to mp3
+    lame -b 320 -B 320 "$TMP_FILE" "$MP3_FILE" $QUIET
+
+    echo "Recorded $MP3_FILE"
+    while [ ! -f "$MP3_FILE" ]
+    do
+        sleep 2
+    done
+
+    # Adds metadata to the mp3 file
+    mid3v2 -a "$ARTIST" -A "$ALBUM" -t "$TITLE" "$MP3_FILE" -T "$TRACK_NUMBER"
+
+    # Check if the mp3 has the right length
+    FILE_LENGTH=`sox "$MP3_FILE" -n stat 2>&1 | sed -n 's#^Length (seconds):[^0-9]*\([0-9.]*\)$#\1#p'`
+    FILE_LENGTH=${FILE_LENGTH%.*}
+
+    # Removes the mp3 file if it hasn't the correct length
+    debuginfo "Recorded file has $FILE_LENGTH seconds. It should have $LENGTH_SECONDS seconds."
+    if [ "$FILE_LENGTH" != "$LENGTH_SECONDS" ]; then
+        if [ -f "$MP3_FILE" ]; then
+            rm -f "$MP3_FILE"
+            echo "Removed invalid recording $MP3_FILE"
+        fi
+    else
+        echo "Successfully recorded $MP3_FILE"
+    fi
+
+    # Deletes the temporary wav file
+    if [ -f "$TMP_FILE" ]; then
+        rm -f "$TMP_FILE"
     fi
 }
 
@@ -132,7 +203,7 @@ create_track() {
 }
 
 # MAIN
-init
+init "$@"
 while read XPROPOUTPUT; do
     get_state
     debuginfo "$DBUSOUTPUT"
