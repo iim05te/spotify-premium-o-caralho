@@ -46,7 +46,7 @@ Run the provided installer:
 ### Usage
 
 1. Open Spotify and start listening your songs
-2. Execute ```spotify-premium-o-caralho.sh```
+2. Execute ```spotify-premium-o-caralho.sh -h```
 
 ### License
 

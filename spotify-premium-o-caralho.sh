@@ -3,7 +3,6 @@
 # Configs
 LIBRARY_FOLDER="library"
 BINARY="spotify"
-DEBUG=0
 TMP_FOLDER="/tmp"
 
 debuginfo() {
@@ -12,7 +11,38 @@ debuginfo() {
     fi
 }
 
+usage() {
+    echo "$0 [-v] [-d <path>]" 1>&2;
+    echo ""
+    echo "Available options:"
+    echo "-d <path> Sets the library directory"
+    echo "-h        Displays this help page"
+    echo "-v        Turns on the debug mode"
+}
+
 init() {
+    DEBUG=0
+
+    while getopts ":d: :h :v" opt; do
+        case $opt in
+            d)
+                LIBRARY_FOLDER="$OPTARG"
+                ;;
+            h)
+                usage
+                exit 1
+                ;;
+            v)
+                DEBUG=1
+                ;;
+            \?)
+                echo "Invalid option: -$OPTARG" >&2
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
     # Makes the library path absolute
     if [[ ! "$LIBRARY_FOLDER" = /* ]]; then
         LIBRARY_FOLDER=`readlink -f $LIBRARY_FOLDER`
@@ -127,9 +157,8 @@ record_track() {
         exit 1
     fi
 
-    echo "Recording $MP3_FILE"
-
     # Captures sound from "pulse_monitor" device to a temporary wav file
+    echo "Recording $MP3_FILE"
     arecord -f cd -D pulse_monitor -r 44100 -d $LENGTH_SECONDS $QUIET "$TMP_FILE"
 
     # Converts the temporary wav file to mp3
@@ -174,7 +203,7 @@ create_track() {
 }
 
 # MAIN
-init
+init "$@"
 while read XPROPOUTPUT; do
     get_state
     debuginfo "$DBUSOUTPUT"
