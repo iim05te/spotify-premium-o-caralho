@@ -83,6 +83,7 @@ get_track_info() {
     XPROP_TRACKDATA="$(echo "$XPROPOUTPUT" | cut -d\" -f 2- | sed 's/"$//g')"
     TRACK_NUMBER=$(echo "$DBUSOUTPUT" | grep xesam:trackNumber -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
     LENGTH=$(echo "$DBUSOUTPUT" | grep mpris:length -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
+    debuginfo "Original LENGTH: $LENGTH"
     LENGTH_SECONDS=`expr $LENGTH / 1000000`
 
     TITLE=$(echo "$DBUSOUTPUT" | grep xesam:title -A 1 | grep variant | cut -d\" -f 2- | sed 's/"$//g')
@@ -147,7 +148,8 @@ create_album() {
 
 record_track() {
     MP3_FILE="$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE.mp3"
-    TMP_FILE="$TMP_FOLDER/temp`date +%s`.wav"
+    TMP_WAV="$TMP_FOLDER/$TITLE.wav"
+    TMP_MP3="$TMP_FOLDER/$TITLE.mp3"
 
     # Stops all active recordings
     killall arecord $QUIET
@@ -158,45 +160,47 @@ record_track() {
     fi
 
     # Captures sound from "pulse_monitor" device to a temporary wav file
-    echo "Recording $MP3_FILE"
-    arecord -f cd -D pulse_monitor -r 44100 -d $LENGTH_SECONDS $QUIET "$TMP_FILE"
+    echo "Recording $TMP_MP3"
+    arecord -f cd -D pulse_monitor -r 44100 -d $LENGTH_SECONDS $QUIET "$TMP_WAV"
 
     # Converts the temporary wav file to mp3
-    lame -b 320 -B 320 "$TMP_FILE" "$MP3_FILE" $QUIET
+    lame -b 320 -B 320 "$TMP_WAV" "$TMP_MP3" $QUIET
 
-    echo "Recorded $MP3_FILE"
-    while [ ! -f "$MP3_FILE" ]
+    echo "Recorded $TMP_MP3"
+    while [ ! -f "$TMP_MP3" ]
     do
         sleep 2
     done
 
     # Adds metadata to the mp3 file
-    mid3v2 -a "$ARTIST" -A "$ALBUM" -t "$TITLE" "$MP3_FILE" -T "$TRACK_NUMBER"
+    mid3v2 -a "$ARTIST" -A "$ALBUM" -t "$TITLE" "$TMP_MP3" -T "$TRACK_NUMBER"
 
     # Check if the mp3 has the right length
-    FILE_LENGTH=`sox "$MP3_FILE" -n stat 2>&1 | sed -n 's#^Length (seconds):[^0-9]*\([0-9.]*\)$#\1#p'`
+    FILE_LENGTH=`sox "$TMP_MP3" -n stat 2>&1 | sed -n 's#^Length (seconds):[^0-9]*\([0-9.]*\)$#\1#p'`
+    debuginfo "FILE_LENGTH: $FILE_LENGTH"
     FILE_LENGTH=${FILE_LENGTH%.*}
 
     # Removes the mp3 file if it hasn't the correct length
     debuginfo "Recorded file has $FILE_LENGTH seconds. It should have $LENGTH_SECONDS seconds."
     if [ "$FILE_LENGTH" != "$LENGTH_SECONDS" ]; then
-        if [ -f "$MP3_FILE" ]; then
-            rm -f "$MP3_FILE"
-            echo "Removed invalid recording $MP3_FILE"
+        if [ -f "$TMP_MP3" ]; then
+            rm -f "$TMP_MP3"
+            echo "Removed invalid recording $TMP_MP3"
         fi
     else
+        create_artist
+        create_album
+        mv "$TMP_MP3" "$MP3_FILE"
         echo "Successfully recorded $MP3_FILE"
     fi
 
     # Deletes the temporary wav file
-    if [ -f "$TMP_FILE" ]; then
-        rm -f "$TMP_FILE"
+    if [ -f "$TMP_WAV" ]; then
+        rm -f "$TMP_WAV"
     fi
 }
 
 create_track() {
-    create_artist
-    create_album
     if [ ! -f "$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE" ]; then
         record_track &
     fi
