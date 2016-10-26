@@ -17,13 +17,15 @@ usage() {
     echo "Available options:"
     echo "-d <path> Sets the library directory"
     echo "-h        Displays this help page"
+    echo "-p        Encodes mp3 files with a bitrate of 320kbps (Use this option if you have a Premium account)"
     echo "-v        Turns on the debug mode"
 }
 
 init() {
     DEBUG=0
+    BITRATE=160
 
-    while getopts ":d: :h :v" opt; do
+    while getopts ":d: :h :p :v" opt; do
         case $opt in
             d)
                 LIBRARY_FOLDER="$OPTARG"
@@ -31,6 +33,9 @@ init() {
             h)
                 usage
                 exit 1
+                ;;
+            p)
+                BITRATE=320
                 ;;
             v)
                 DEBUG=1
@@ -164,7 +169,7 @@ record_track() {
     arecord -f cd -D pulse_monitor -r 44100 -d $LENGTH_SECONDS $QUIET "$TMP_WAV"
 
     # Converts the temporary wav file to mp3
-    lame -b 320 -B 320 "$TMP_WAV" "$TMP_MP3" $QUIET
+    lame -b $BITRATE -B $BITRATE "$TMP_WAV" "$TMP_MP3" $QUIET
 
     echo "Recorded $TMP_MP3"
     while [ ! -f "$TMP_MP3" ]
