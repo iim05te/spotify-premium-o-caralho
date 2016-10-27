@@ -1,18 +1,8 @@
 #!/bin/bash
 
-# Configs
-LIBRARY_FOLDER="library"
-BINARY="spotify"
-TMP_FOLDER="/tmp"
-
-debuginfo() {
-    if [[ "$DEBUG" = "1" ]]; then
-        echo "$1"
-    fi
-}
-
+# Prints the available options
 usage() {
-    echo "$0 [-v] [-d <path>]" 1>&2;
+    echo "$0 [-hpv] [-d <path>]" 1>&2;
     echo ""
     echo "Available options:"
     echo "-d <path> Sets the library directory"
@@ -21,10 +11,38 @@ usage() {
     echo "-v        Turns on the debug mode"
 }
 
+# Prints output if debug mode is enabled
+debuginfo() {
+    if [[ "$DEBUG" = "1" ]]; then
+        echo "$1"
+    fi
+}
+
+# Initializes the script
 init() {
-    DEBUG=0
+    # Configs
+    LIBRARY_FOLDER="library"
+    BINARY="spotify"
+    TMP_FOLDER="/tmp"
     BITRATE=160
 
+    # States
+    DEBUG=0
+    IS_RECORDING=0
+
+    # Children Pids
+    RECORDING_DISPLAY_PID=""
+    RECORDING_PID=""
+
+    # Text colours
+    readonly RED="\033[01;31m"
+    readonly GREEN="\033[01;32m"
+    readonly BLUE="\033[01;34m"
+    readonly YELLOW="\033[00;33m"
+    readonly BOLD="\033[01m"
+    readonly END="\033[0m"
+
+    # Gets command line arguments
     while getopts ":d: :h :p :v" opt; do
         case $opt in
             d)
@@ -67,18 +85,19 @@ init() {
         QUIET=""
     fi
 
-    SPOTIFY_VERSION=`spotify --version`
-    debuginfo "$SPOTIFY_VERSION"
-
     WINDOWID=$(xdotool search --classname "$BINARY" | tail -1)
     if [[ -z "$WINDOWID" ]]; then
       echo "Spotify not active. Exiting."
       exit 1
     fi
 
+    SPOTIFY_VERSION=`spotify --version`
+    debuginfo "$SPOTIFY_VERSION"
+
     xpropcommand=(xprop -spy -id "$WINDOWID" _NET_WM_NAME)
 }
 
+# Gets all info from dbus
 get_track_info() {
     XPROPOUTPUT=$(xprop -id "$WINDOWID" _NET_WM_NAME)
     DBUSOUTPUT=$(dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 \
@@ -95,83 +114,68 @@ get_track_info() {
     TRACKDATA="$ARTIST - $TITLE"
 }
 
+# Gets the Spotify sink info from PulseAudio sound server
 get_pactl_info() {
     pacmd list-sink-inputs | grep -B 25 "application.process.binary = \"$BINARY\""
 }
 
+# Updates the main states
 get_state() {
     get_track_info
 
-    # check if track paused
+    # Check if the track is paused
     debuginfo "$(get_pactl_info)"
     if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
-        # wait and recheck
+        # Waits and rechecks
         sleep 0.75
         if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
-            echo "PAUSED:   Yes"
+            debuginfo "PAUSED:   Yes"
             PAUSED=1
         fi
         get_track_info
     else
         get_track_info
-        echo "PAUSED:   No"
+        debuginfo "PAUSED:   No"
         PAUSED=0
         CURRENT_TRACK=$TRACKDATA
     fi
 
-    # check if track is an ad
+    # Checks if the track is an ad
     if [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "0" ]]; then
-        echo "AD:       Yes"
+        debuginfo "AD:       Yes"
         AD=1
     elif [[ "$TRACKDATA" == " - Spotify" && "$PAUSED" = "0" ]]; then
-        echo "AD:       Yes"
+        debuginfo "AD:       Yes"
         AD=1
     elif [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "1" ]]; then
-        echo "AD:       Can't say"
+        debuginfo "AD:       Can't say"
         AD=0
     else
-        echo "AD:       No"
+        debuginfo "AD:       No"
         AD=0
     fi
 }
 
-print_horiz_line(){
-    printf '%*s\n' "${COLUMNS:-$(tput cols)}" '' | tr ' ' -
-}
-
-create_artist() {
-    if [ ! -d "$LIBRARY_FOLDER/$ARTIST" ]; then
-        mkdir "$LIBRARY_FOLDER/$ARTIST"
-    fi
-}
-
-create_album() {
-    if [ ! -d "$LIBRARY_FOLDER/$ARTIST/$ALBUM" ]; then
-        mkdir "$LIBRARY_FOLDER/$ARTIST/$ALBUM"
-    fi
-}
-
-record_track() {
-    MP3_FILE="$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE.mp3"
-    TMP_WAV="$TMP_FOLDER/$TITLE.wav"
-    TMP_MP3="$TMP_FOLDER/$TITLE.mp3"
-
-    # Stops all active recordings
-    killall arecord $QUIET
-
-    # Checks if the track needs to be recorded.
-    if [ -f "$MP3_FILE" ]; then
-        exit 1
-    fi
+# Starts recording the playing track
+start_recording() {
+    # Gets ready to be sacrificed by his parent
+    trap "sacrifice_child" SIGTERM
 
     # Captures sound from "pulse_monitor" device to a temporary wav file
-    echo "Recording $TMP_MP3"
     arecord -f cd -D pulse_monitor -r 44100 -d $LENGTH_SECONDS $QUIET "$TMP_WAV"
+
+    # Sets recording state to stopped
+    IS_RECORDING=0
 
     # Converts the temporary wav file to mp3
     lame -b $BITRATE -B $BITRATE "$TMP_WAV" "$TMP_MP3" $QUIET
 
-    echo "Recorded $TMP_MP3"
+    # Deletes the temporary wav file
+    if [ -f "$TMP_WAV" ]; then
+        rm -f "$TMP_WAV"
+    fi
+
+    # Waits a while until the mp3 file is created
     while [ ! -f "$TMP_MP3" ]
     do
         sleep 2
@@ -180,39 +184,97 @@ record_track() {
     # Adds metadata to the mp3 file
     mid3v2 -a "$ARTIST" -A "$ALBUM" -t "$TITLE" "$TMP_MP3" -T "$TRACK_NUMBER"
 
-    # Check if the mp3 has the right length
+    # Checks if the mp3 has the correct length
     FILE_LENGTH=`sox "$TMP_MP3" -n stat 2>&1 | sed -n 's#^Length (seconds):[^0-9]*\([0-9.]*\)$#\1#p'`
     debuginfo "FILE_LENGTH: $FILE_LENGTH"
     FILE_LENGTH=${FILE_LENGTH%.*}
 
     # Removes the mp3 file if it hasn't the correct length
-    debuginfo "Recorded file has $FILE_LENGTH seconds. It should have $LENGTH_SECONDS seconds."
     if [ "$FILE_LENGTH" != "$LENGTH_SECONDS" ]; then
         if [ -f "$TMP_MP3" ]; then
             rm -f "$TMP_MP3"
-            echo "Removed invalid recording $TMP_MP3"
+            echo -e "\r$RED[ERROR]$END $TMP_MP3 has $FILE_LENGTH seconds instead of $LENGTH_SECONDS.";
+            exit 1
         fi
-    else
-        create_artist
-        create_album
-        mv "$TMP_MP3" "$MP3_FILE"
-        echo "Successfully recorded $MP3_FILE"
     fi
 
-    # Deletes the temporary wav file
-    if [ -f "$TMP_WAV" ]; then
-        rm -f "$TMP_WAV"
+    # Creates the artist's folder
+    if [ ! -d "$LIBRARY_FOLDER/$ARTIST" ]; then
+        mkdir "$LIBRARY_FOLDER/$ARTIST"
     fi
+
+    # Creates the album's folder
+    if [ ! -d "$LIBRARY_FOLDER/$ARTIST/$ALBUM" ]; then
+        mkdir "$LIBRARY_FOLDER/$ARTIST/$ALBUM"
+    fi
+
+    # Moves the recorded file to the library
+    mv "$TMP_MP3" "$MP3_FILE"
+    echo -e "\r$GREEN[OK]$END $MP3_FILE";
 }
 
-create_track() {
-    if [ ! -f "$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE" ]; then
-        record_track &
+# Sets recording state to started, and starts recording
+start_recording_display() {
+    # Gets ready to be sacrificed by his parent
+    trap "sacrifice_child" SIGTERM
+
+    MP3_FILE="$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE.mp3"
+    TMP_MP3="$TMP_FOLDER/$TITLE.mp3"
+
+    # Checks if the track needs to be recorded.
+    if [ -f "$MP3_FILE" ]; then
+        echo "Já existe $MP3_FILE"
+        exit 1
     fi
+
+    # Creates a new process to record
+    start_recording &
+    RECORDING_PID=$!
+
+    # Updates the progress output every second until it reaches the end
+    i=0
+    while [ $i -lt $LENGTH_SECONDS ]
+    do
+        sleep 1
+        i=$(($i + 1))
+        percent=$((100*$i/$LENGTH_SECONDS))
+        echo -en "\r$YELLOW[Recording $TMP_WAV]$END $percent% ($i/$LENGTH_SECONDS)";
+    done
+    echo -en "\033[2K"
 }
 
-# MAIN
+# Sets recording state to paused, and stops recording
+pause_recording() {
+    echo -en "\033[2K"
+    echo -e "\r$RED[Recording paused $TMP_WAV]$END This file will be deleted";
+    kill -15 $RECORDING_DISPLAY_PID > /dev/null 2>&1
+}
+
+# Sets recording state to stopped, and stops recording
+stop_recording() {
+    IS_RECORDING=0
+    kill -15 $RECORDING_DISPLAY_PID > /dev/null 2>&1
+    echo -en "\033[2K"
+}
+
+# Kills a child process, ie, stops the recording process
+sacrifice_child() {
+    kill -9 $RECORDING_PID
+    exit 1
+}
+
+# Stops main execution
+terminate() {
+    echo ""
+    stop_recording
+    exit 1
+}
+
+# Main execution starts here
 init "$@"
+
+trap "terminate" SIGINT
+
 while read XPROPOUTPUT; do
     get_state
     debuginfo "$DBUSOUTPUT"
@@ -221,8 +283,36 @@ while read XPROPOUTPUT; do
     debuginfo "Song:     $TITLE"
     debuginfo "Length:   $LENGTH_SECONDS"
 
-    if [[ "$PAUSED" = "0" && "$AD" = 0 ]]; then
-        create_track
+    TMP_WAV="$TMP_FOLDER/$TITLE.wav"
+
+    # Is playing some track
+    if [[ "$PAUSED" = "0" && "$AD" = "0" ]]; then
+        if [[ $IS_RECORDING = "1" ]]; then
+            stop_recording
+            # echo "matou o $RECORDING_DISPLAY_PID"
+        fi
+
+        # Starts recording if it is a new track
+        if [ ! -f "$LIBRARY_FOLDER/$ARTIST/$ALBUM/$TITLE" ]; then
+            # Creates a new process to display the recording progress
+            start_recording_display &
+            IS_RECORDING=1
+            RECORDING_DISPLAY_PID=$!
+        fi
+
+    # Is paused
+    elif [[ "$PAUSED" = "1" && "$AD" = "0" ]]; then
+        if [[ $IS_RECORDING = "1" ]]; then
+            pause_recording
+        else
+            echo -en "\r$BLUE[Paused]$END";
+        fi
+
+    # Is playing ads
+    elif [[ "$PAUSED" = "0" && "$AD" = "1" ]]; then
+        echo -e "\r$BLUE[Playing Ads]$END Please wait";
+        if [[ $IS_RECORDING = "1" ]]; then
+            stop_recording
+        fi
     fi
-    print_horiz_line
 done < <("${xpropcommand[@]}")
