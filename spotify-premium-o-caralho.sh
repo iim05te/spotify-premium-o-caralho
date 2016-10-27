@@ -18,6 +18,26 @@ debuginfo() {
     fi
 }
 
+launch_spotify() {
+    # Starts Spotify
+    $BINARY > /dev/null 2>&1 &
+    # wait for spotify to launch
+    # if spotify not launched after 50 seconds exit script
+    while true; do
+        if [[ "$COUNTER" = "10" ]]; then
+            echo "Error: Spotify not found."
+            exit 1
+        fi
+        debuginfo "## Waiting for Spotify ##"
+        xdotool search --classname "$BINARY" > /dev/null 2>&1
+        if [[ "$?" == "0" ]]; then
+            break
+        fi
+        COUNTER=$(( COUNTER + 1 ))
+        sleep 5
+    done
+}
+
 # Initializes the script
 init() {
     # Configs
@@ -66,6 +86,9 @@ init() {
         esac
     done
 
+    # Terminates execution after receiving a SIGINT
+    trap "terminate" SIGINT
+
     # Makes the library path absolute
     if [[ ! "$LIBRARY_FOLDER" = /* ]]; then
         LIBRARY_FOLDER=`readlink -f $LIBRARY_FOLDER`
@@ -86,9 +109,12 @@ init() {
     fi
 
     WINDOWID=$(xdotool search --classname "$BINARY" | tail -1)
+    debuginfo "WINDOWID: $WINDOWID"
     if [[ -z "$WINDOWID" ]]; then
-      echo "Spotify not active. Exiting."
-      exit 1
+        launch_spotify
+        WINDOWID=$(xdotool search --classname "$BINARY" | tail -1)
+        debuginfo "WINDOWID: $WINDOWID"
+        # exit 1
     fi
 
     SPOTIFY_VERSION=`spotify --version`
@@ -107,7 +133,6 @@ get_track_info() {
     XPROP_TRACKDATA="$(echo "$XPROPOUTPUT" | cut -d\" -f 2- | sed 's/"$//g')"
     TRACK_NUMBER=$(echo "$DBUSOUTPUT" | grep xesam:trackNumber -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
     LENGTH=$(echo "$DBUSOUTPUT" | grep mpris:length -A 1 | grep variant | cut -d' ' -f30- | sed 's/"$//g')
-    debuginfo "Original LENGTH: $LENGTH"
     LENGTH_SECONDS=`expr $LENGTH / 1000000`
 
     TITLE=$(echo "$DBUSOUTPUT" | grep xesam:title -A 1 | grep variant | cut -d\" -f 2- | sed 's/"$//g')
@@ -272,9 +297,6 @@ terminate() {
 
 # Main execution starts here
 init "$@"
-
-trap "terminate" SIGINT
-
 while read XPROPOUTPUT; do
     get_state
     debuginfo "$DBUSOUTPUT"
@@ -289,7 +311,6 @@ while read XPROPOUTPUT; do
     if [[ "$PAUSED" = "0" && "$AD" = "0" ]]; then
         if [[ $IS_RECORDING = "1" ]]; then
             stop_recording
-            # echo "matou o $RECORDING_DISPLAY_PID"
         fi
 
         # Starts recording if it is a new track
@@ -310,9 +331,12 @@ while read XPROPOUTPUT; do
 
     # Is playing ads
     elif [[ "$PAUSED" = "0" && "$AD" = "1" ]]; then
-        echo -e "\r$BLUE[Playing Ads]$END Please wait";
         if [[ $IS_RECORDING = "1" ]]; then
+            echo -e "\r$BLUE[Playing Ads]$END Please wait";
             stop_recording
+        else
+            # Somehow Spotify gets here when it starts, because AD=1
+            echo -en "\r$BLUE[Stopped]$END";
         fi
     fi
 done < <("${xpropcommand[@]}")
