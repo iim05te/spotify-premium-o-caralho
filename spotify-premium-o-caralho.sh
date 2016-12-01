@@ -297,6 +297,7 @@ terminate() {
 
 # Main execution starts here
 init "$@"
+INDEX=0
 while read XPROPOUTPUT; do
     get_state
     debuginfo "$DBUSOUTPUT"
@@ -304,6 +305,13 @@ while read XPROPOUTPUT; do
     debuginfo "Album:    $ALBUM"
     debuginfo "Song:     $TITLE"
     debuginfo "Length:   $LENGTH_SECONDS"
+
+    # Ignores the first track if it was already playing
+    INDEX=$((INDEX+1))
+    if [[ $INDEX -eq 1 ]]; then
+        echo "Waiting for the next track to start"
+        continue
+    fi
 
     TMP_WAV="$TMP_FOLDER/$TITLE.wav"
 
