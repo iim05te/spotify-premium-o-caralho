@@ -120,6 +120,7 @@ get_state() {
     fi
 
     # check if track is an ad
+    WAS_AD=$AD
     if [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "0" ]]; then
         echo "AD:       Yes"
         AD=1
@@ -222,7 +223,11 @@ while read XPROPOUTPUT; do
     debuginfo "Length:   $LENGTH_SECONDS"
 
     if [[ "$PAUSED" = "0" && "$AD" = 0 ]]; then
-        create_track
+        # Only records track if previous track was not an AD, to avoid AD overlaping next song
+        debuginfo "WAS_AD = $WAS_AD"
+        if [[ "$WAS_AD" = 0 ]]; then
+            create_track
+        fi
     fi
     print_horiz_line
 done < <("${xpropcommand[@]}")
