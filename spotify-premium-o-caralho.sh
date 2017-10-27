@@ -24,6 +24,7 @@ usage() {
 init() {
     DEBUG=0
     BITRATE=160
+    IS_PLAYING=0
 
     while getopts ":d: :h :p :v" opt; do
         case $opt in
@@ -109,25 +110,29 @@ get_state() {
         sleep 0.75
         if get_pactl_info | grep 'state: CORKED' > /dev/null 2>&1; then
             echo "PAUSED:   Yes"
-            PAUSED=1
+            IS_PLAYING=0
         fi
         get_track_info
     else
         get_track_info
         echo "PAUSED:   No"
-        PAUSED=0
+        IS_PLAYING=1
         CURRENT_TRACK=$TRACKDATA
     fi
 
+    # check if AD is set to determine if last song was an ad
+    if [ ! -z ${AD+x} ]; then
+        WAS_AD=$AD
+    fi
+
     # check if track is an ad
-    WAS_AD=$AD
-    if [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "0" ]]; then
+    if [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$IS_PLAYING" = "1" ]]; then
         echo "AD:       Yes"
         AD=1
-    elif [[ "$TRACKDATA" == " - Spotify" && "$PAUSED" = "0" ]]; then
+    elif [[ "$TRACKDATA" == " - Spotify" && "$IS_PLAYING" = "1" ]]; then
         echo "AD:       Yes"
         AD=1
-    elif [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$PAUSED" = "1" ]]; then
+    elif [[ ! "$XPROP_TRACKDATA" == *"$TRACKDATA"* && "$IS_PLAYING" = "0" ]]; then
         echo "AD:       Can't say"
         AD=0
     else
@@ -217,15 +222,16 @@ init "$@"
 while read XPROPOUTPUT; do
     get_state
     debuginfo "$DBUSOUTPUT"
-    debuginfo "Artist:   $ARTIST"
-    debuginfo "Album:    $ALBUM"
-    debuginfo "Song:     $TITLE"
-    debuginfo "Length:   $LENGTH_SECONDS"
+    debuginfo "Artist:     $ARTIST"
+    debuginfo "Album:      $ALBUM"
+    debuginfo "Song:       $TITLE"
+    debuginfo "Length:     $LENGTH_SECONDS"
+    debuginfo "IS_PLAYING: $IS_PLAYING"
 
-    if [[ "$PAUSED" = "0" && "$AD" = 0 ]]; then
+    if [[ "$IS_PLAYING" = "0" && "$AD" = "0" ]]; then
         # Only records track if previous track was not an AD, to avoid AD overlaping next song
-        debuginfo "WAS_AD = $WAS_AD"
-        if [[ "$WAS_AD" = 0 ]]; then
+        debuginfo "WAS_AD:     $WAS_AD"
+        if [[ "$WAS_AD" = "0" ]]; then
             create_track
         fi
     fi
